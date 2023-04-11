@@ -133,6 +133,7 @@ async function checkVersion() {
  */
 async function consturctServer(moduleDefs) {
   const app = express()
+  const { CORS_ALLOW_ORIGIN } = process.env
   app.set('trust proxy', true)
 
   /**
@@ -142,7 +143,8 @@ async function consturctServer(moduleDefs) {
     if (req.path !== '/' && !req.path.includes('.')) {
       res.set({
         'Access-Control-Allow-Credentials': true,
-        'Access-Control-Allow-Origin': req.headers.origin || '*',
+        'Access-Control-Allow-Origin':
+          CORS_ALLOW_ORIGIN || req.headers.origin || '*',
         'Access-Control-Allow-Headers': 'X-Requested-With,Content-Type',
         'Access-Control-Allow-Methods': 'PUT,POST,GET,DELETE,OPTIONS',
         'Content-Type': 'application/json; charset=utf-8',
@@ -215,10 +217,25 @@ async function consturctServer(moduleDefs) {
         { cookie: req.cookies },
         req.query,
         req.body,
+        req.files,
       )
 
       try {
-        const moduleResponse = await moduleDef.module(query, request)
+        const moduleResponse = await moduleDef.module(query, (...params) => {
+          // 参数注入客户端IP
+          const obj = [...params]
+          let ip = req.ip
+
+          if (ip.substr(0, 7) == '::ffff:') {
+            ip = ip.substr(7)
+          }
+          // console.log(ip)
+          obj[3] = {
+            ...obj[3],
+            ip,
+          }
+          return request(...obj)
+        })
         console.log('[OK]', decode(req.originalUrl))
 
         const cookies = moduleResponse.cookie
@@ -294,28 +311,7 @@ async function serveNcmApi(options) {
   return appExt
 }
 
-let obj = {}
-fs.readdirSync(path.join(__dirname, 'module'))
-  .reverse()
-  .forEach((file) => {
-    if (!file.endsWith('.js')) return
-    let fileModule = require(path.join(__dirname, 'module', file))
-    obj[file.split('.').shift()] = function (data) {
-      if (typeof data.cookie === 'string') {
-        data.cookie = cookieToJson(data.cookie)
-      }
-      return fileModule(
-        {
-          ...data,
-          cookie: data.cookie ? data.cookie : {},
-        },
-        request,
-      )
-    }
-  })
-
 module.exports = {
   serveNcmApi,
   getModulesDefinitions,
-  ...obj,
 }
